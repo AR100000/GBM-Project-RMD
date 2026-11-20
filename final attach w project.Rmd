@@ -1,0 +1,1550 @@
+---
+title: "final attach w project"
+author: "Alex Richford"
+date: "2026-11-02"
+output: html_document
+---
+
+The data is available on the repo
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Loading saved analysis results and defining formatting functions
+
+```{r echo=TRUE}
+library(ggplot2)
+library(gt)
+
+# Load all saved analysis results1
+
+saved <- readRDS("industry_comparisons.rds")
+
+analysis_periods <- saved$analysis_periods
+period_results <- saved$period_results
+comparison_metrics <- saved$comparison_metrics
+period_comparisons <- saved$period_comparisons
+comparison_plots <- saved$comparison_plots
+comparison_tables <- saved$comparison_tables
+data_list <- saved$data_list
+
+Chosen_Stock <- "ULVR"
+
+start_date <- as.Date("2020-01-01")
+end_date <- as.Date("2022-12-31")
+
+trading_days <- 252
+n_simulations <- 500
+
+stock <- data_list[[Chosen_Stock]]
+
+all_dates <- as.Date(stock$date, format = "%Y-%m-%d")
+all_prices <- as.numeric(as.character(stock$close))
+
+selected <- !is.na(all_dates) &
+  all_dates >= start_date &
+  all_dates <= end_date &
+  is.finite(all_prices) &
+  all_prices > 0
+
+ordering <- order(all_dates[selected])
+
+dates <- all_dates[selected][ordering]
+prices <- all_prices[selected][ordering]
+
+# Estimate GBM parameters
+log_returns <- diff(log(prices))
+
+sigma_hat <- sd(log_returns) * sqrt(trading_days)
+
+mu_hat <- mean(log_returns) * trading_days +
+  0.5 * sigma_hat^2
+
+comparison_summary <- period_comparisons
+
+period_names <- names(analysis_periods)
+
+
+format_sf3 <- function(x) {
+  
+  vapply(x, function(value) {
+    
+    if (is.na(value) || !is.finite(value)) return("NA")
+    if (value == 0) return("0.00")
+    
+    rounded <- signif(value, 3)
+    
+    if (abs(rounded) >= 1e5 || abs(rounded) < 1e-4) {
+      return(sprintf("%.2e", rounded))
+    }
+    
+    decimals <- max(0, 2 - floor(log10(abs(rounded))))
+    
+    sprintf(paste0("%.", decimals, "f"), rounded)
+    
+  }, character(1))
+  
+}
+
+wrap_industry <- function(x) {
+  
+  vapply(
+    as.character(x),
+    function(name) {
+      paste(strwrap(name, width = 25), collapse = "\n")
+    },
+    character(1)
+  )
+  
+}
+
+```
+
+## R Markdown
+
+```{r echo=TRUE}
+names(data_list)
+
+```
+
+Figure for Industries
+
+```{r industry-classification, echo=TRUE, fig.height=11, fig.width=14, message=FALSE, warning=FALSE, out.width="100%"}
+
+library(ggplot2)
+
+# Define industry classifications
+
+industry_tickers <- list(
+  
+  "Energy and Utilities" = c(
+    "BP", "CNA", "HBR", "ITH", "NG",
+    "SHEL", "SSE", "SVT", "UU"
+  ),
+  
+  "Mining and Metals" = c(
+    "AAL", "ANTO", "EDV", "FRES", "MTLN",
+    "RIO"
+  ),
+  
+  "Financials" = c(
+    "ABDN", "ADM", "AV", "BARC", "BGEO",
+    "HSBA", "ICG", "III", "INVP", "LGEN",
+    "LLOY", "MNG", "NWG", "PRU", "SDLF",
+    "STAN", "STJ", "LSEG", "EXPN"
+  ),
+  
+  "Industrials and Engineering" = c(
+    "BA", "BAB", "BBY", "BNZL", "CRDA",
+    "DPLM", "HLMA", "IMI", "ITRK", "MRO",
+    "ROR", "RSW", "SMIN", "SPX", "WEIR"
+  ),
+  
+  "Consumer Staples" = c(
+    "ABF", "BATS", "CCEP", "DGE", "IMB",
+    "RKT", "SBRY", "TSCO", "ULVR"
+  ),
+  
+  "Consumer Discretionary and Retail" = c(
+    "BRBY", "FRAS", "GAW", "JD", "KGF",
+    "MKS", "NXT"
+  ),
+  
+  "Travel, Leisure and Hospitality" = c(
+    "CPG", "EZJ", "IHG", "WTB"
+  ),
+  
+  "Healthcare" = c(
+    "AZN", "CTEC", "GSK", "HLN", "SN"
+  ),
+  
+  "Technology, Media and Telecoms" = c(
+    "AAF", "AUTO", "BT.A", "CCC", "INF",
+    "PSON", "REL", "SCT", "SGE", "VOD",
+    "ZEG"
+  ),
+  
+  "Property and Housebuilding" = c(
+    "BBOX", "BLND", "BTRW", "LAND", "LMP",
+    "PSN", "SGRO"
+  ),
+  
+  "Business Services and Building Products" = c(
+    "HWDN", "RTO", "RMV"
+  ),
+  
+  "Investment Trusts" = c(
+    "ALW", "FCIT", "PCT", "SMT"
+  )
+  
+)
+
+
+# to data frame
+
+industry_classification <- data.frame(
+  Ticker = unlist(industry_tickers, use.names = FALSE),
+  Industry = rep(
+    names(industry_tickers),
+    lengths(industry_tickers)
+  )
+)
+
+industry_classification$Industry <- factor(
+  industry_classification$Industry,
+  levels = names(industry_tickers)
+)
+
+
+# Assign each ticker a position within its industry
+
+industry_classification$Position <- ave(
+  seq_len(nrow(industry_classification)),
+  industry_classification$Industry,
+  FUN = seq_along
+)
+
+industry_classification$Column <- (
+  (industry_classification$Position - 1) %% 5
+) + 1
+
+industry_classification$Row <- 4 - (
+  (industry_classification$Position - 1) %/% 5
+)
+
+
+# Plot each industry in a separate panel
+
+ggplot(
+  industry_classification,
+  aes(x = Column, y = Row)
+) +
+  geom_tile(
+    width = 0.92,
+    height = 0.78,
+    fill = "#E4EFF9",
+    colour = "#B7CCDE",
+    linewidth = 0.5
+  ) +
+  geom_text(
+    aes(label = Ticker),
+    size = 3.5,
+    colour = "#213B56",
+    fontface = "bold"
+  ) +
+  facet_wrap(
+    ~ Industry,
+    ncol = 3,
+    labeller = labeller(
+      Industry = label_wrap_gen(width = 25)
+    )
+  ) +
+  scale_x_continuous(
+    limits = c(0.5, 5.5),
+    breaks = NULL,
+    expand = c(0, 0)
+  ) +
+  scale_y_continuous(
+    limits = c(0.5, 4.5),
+    breaks = NULL,
+    expand = c(0, 0)
+  ) +
+  labs(
+    title = "Industry Classification of Analysed Stocks",
+    subtitle = paste(
+      length(industry_tickers), "industry groups |",
+      length(unlist(industry_tickers)), "classified tickers"
+    )
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    
+    strip.background = element_rect(
+      fill = "#EDF1F5",
+      colour = NA
+    ),
+    
+    strip.text = element_text(
+      face = "bold",
+      size = 10,
+      colour = "#253247",
+      margin = margin(8, 4, 8, 4)
+    ),
+    
+    panel.spacing = grid::unit(1.2, "lines"),
+    
+    plot.title = element_text(
+      face = "bold",
+      size = 16,
+      margin = margin(b = 8)
+    ),
+    
+    plot.subtitle = element_text(
+      size = 11,
+      colour = "grey40",
+      margin = margin(b = 15)
+    )
+  )
+```
+
+# Dividends
+
+```{r dividend-comparison, echo=TRUE, message=FALSE, warning=FALSE}
+library(quantmod)
+library(knitr)
+
+# Get kaggel and yahoo prices for BP
+bp_yahoo <- getSymbols(
+  "BP.L",
+  src = "yahoo",
+  from = "2024-01-01",
+  to = "2025-01-01",
+  auto.assign = FALSE
+)
+
+comparison <- merge(
+  data.frame(
+    date = as.Date(data_list[["BP"]]$date),
+    kaggle = data_list[["BP"]]$close
+  ),
+  data.frame(
+    date = as.Date(index(bp_yahoo)),
+    unadjusted = as.numeric(Cl(bp_yahoo)),
+    adjusted = as.numeric(Ad(bp_yahoo))
+  ),
+  by = "date"
+)
+
+comparison <- comparison[order(comparison$date), ]
+
+# daily log returns
+returns <- lapply(comparison[-1], function(x) diff(log(x)))
+
+# mean absolute differences
+results <- data.frame(
+  Comparison = c("Unadjusted prices", "Dividend-adjusted prices"),
+  Mean_Absolute_Difference = c(
+    mean(abs(returns$kaggle - returns$unadjusted)),
+    mean(abs(returns$kaggle - returns$adjusted))
+  )
+)
+
+results$Mean_Absolute_Difference <- sprintf(
+  "%.12f",
+  results$Mean_Absolute_Difference
+)
+
+knitr::kable(
+  results,
+  col.names = c("Yahoo Finance comparison", "Mean absolute difference"),
+  caption = "Comparison of BP daily log returns: Kaggle vs Yahoo Finance (2024)",
+  align = c("l", "r")
+)
+```
+
+## Forecast Accuracy using Different time horizons
+
+### Forecast Setup
+
+```{r fh-fixed-setup, echo=TRUE, message=FALSE, warning=FALSE}
+
+fh_needed <- c("data_list", "Chosen_Stock", "dates", "prices", "start_date",
+               "end_date", "mu_hat", "sigma_hat", "trading_days",
+               "n_simulations")
+fh_missing <- fh_needed[!vapply(fh_needed, exists, logical(1), inherits = TRUE)]
+if (length(fh_missing) > 0) {
+  stop("Run the preceding single-stock chunks first. Missing: ",
+       paste(fh_missing, collapse = ", "))
+}
+# choose parameters
+
+fh_stock <- Chosen_Stock
+fh_mu <- mu_hat
+fh_sigma <- sigma_hat
+fh_trading_days <- trading_days
+fh_n_simulations <- 5000
+fh_training_start <- as.Date(start_date)
+fh_training_end <- as.Date(end_date)
+fh_horizons <- c(5L, 21L, 63L, 126L, 252L)
+fh_forecast_days <- max(fh_horizons)
+
+# check filters
+if (length(dates) != length(prices) || length(prices) < 30L ||
+    anyNA(dates) || any(!is.finite(prices)) || any(prices <= 0)) {
+  stop("The preceding single-stock dates/prices are missing or invalid.")
+}
+if (is.unsorted(dates) || min(dates) < fh_training_start ||
+    max(dates) > fh_training_end) {
+  stop("The dates/prices objects do not match the selected training period. Run choose-initial-stock again.")
+}
+if (!is.finite(fh_mu) || !is.finite(fh_sigma) || fh_sigma <= 0 ||
+    !is.finite(fh_trading_days) || fh_trading_days <= 0 ||
+    !is.finite(fh_n_simulations) || fh_n_simulations < 2) {
+  stop("The existing fixed GBM parameters or simulation settings are invalid.")
+}
+
+fh_origin_date <- tail(dates, 1)
+fh_S0 <- tail(prices, 1)
+
+fh_stock_data <- data_list[[fh_stock]]
+if (is.null(fh_stock_data) ||
+    !all(c("date", "close") %in% names(fh_stock_data))) {
+  stop("Could not find 'date' and 'close' for the selected stock in data_list.")
+}
+fh_all_dates <- as.Date(fh_stock_data$date, format = "%Y-%m-%d")
+fh_all_prices <- suppressWarnings(as.numeric(as.character(fh_stock_data$close)))
+fh_future_keep <- !is.na(fh_all_dates) & is.finite(fh_all_prices) &
+  fh_all_prices > 0 & fh_all_dates > fh_origin_date
+fh_future <- data.frame(
+  Date = fh_all_dates[fh_future_keep],
+  Price = fh_all_prices[fh_future_keep]
+)
+fh_future <- fh_future[order(fh_future$Date), , drop = FALSE]
+# Keep one observation per date in the forecast dataset.
+fh_future <- fh_future[!duplicated(fh_future$Date, fromLast = TRUE), , drop = FALSE]
+rownames(fh_future) <- NULL
+
+if (nrow(fh_future) < fh_forecast_days) {
+  stop(sprintf(
+    "Only %d subseqent valid trading-day prices exist after %s; %d are required.",
+    nrow(fh_future), as.character(fh_origin_date), fh_forecast_days
+  ))
+}
+
+# 252 subseqent days forecasted
+fh_future <- fh_future[seq_len(fh_forecast_days), , drop = FALSE]
+fh_forecast_dates <- c(fh_origin_date, fh_future$Date)
+fh_actual_prices <- c(fh_S0, fh_future$Price)
+fh_time <- (0:fh_forecast_days) / fh_trading_days
+
+cat("Stock:", fh_stock, "\n")
+cat("Training dates:", as.character(min(dates)), "to",
+    as.character(fh_origin_date), "\n")
+cat("Out-of-sample evaluation ends:",
+    as.character(tail(fh_forecast_dates, 1)), "\n")
+cat("Fixed annualised drift:", round(fh_mu, 4), "\n")
+cat("Fixed annualised volatility:", round(fh_sigma, 4), "\n")
+cat("Simulation paths:", fh_n_simulations, "\n")
+```
+
+### 5000 Simulations over 252 subsequent trading days
+
+run simulation for the 252 subsequent trading days
+
+```{r fh-fixed-simulate, echo=TRUE}
+set.seed(123)
+fh_daily_increments <- matrix(
+  rnorm(
+    fh_forecast_days * fh_n_simulations,
+    mean = (fh_mu - 0.5 * fh_sigma^2) / fh_trading_days,
+    sd = fh_sigma / sqrt(fh_trading_days)
+  ),
+  nrow = fh_forecast_days,
+  ncol = fh_n_simulations
+)
+
+fh_simulated_prices <- rbind(
+  rep(fh_S0, fh_n_simulations),
+  fh_S0 * exp(apply(fh_daily_increments, 2, cumsum))
+)
+
+# exepcted price
+fh_expected <- fh_S0 * exp(fh_mu * fh_time)
+fh_z95 <- qnorm(0.975)
+fh_lower95 <- fh_S0 * exp(
+  (fh_mu - 0.5 * fh_sigma^2) * fh_time -
+    fh_z95 * fh_sigma * sqrt(fh_time)
+)
+fh_upper95 <- fh_S0 * exp(
+  (fh_mu - 0.5 * fh_sigma^2) * fh_time +
+    fh_z95 * fh_sigma * sqrt(fh_time)
+)
+
+fh_trajectory <- data.frame(
+  Date = fh_forecast_dates,
+  Day = 0:fh_forecast_days,
+  Observed = fh_actual_prices,
+  Expected = fh_expected,
+  Lower95 = fh_lower95,
+  Upper95 = fh_upper95
+)
+fh_simulations_long <- data.frame(
+  Date = rep(fh_forecast_dates, fh_n_simulations),
+  Price = as.vector(fh_simulated_prices),
+  Path = rep(seq_len(fh_n_simulations), each = length(fh_forecast_dates))
+)
+fh_markers <- fh_trajectory[fh_horizons + 1L, , drop = FALSE]
+
+```
+
+```{r fh-fixed-paths-plot, echo=TRUE, fig.height=6.5, fig.width=12, message=FALSE, warning=FALSE, out.width="100%"}
+
+library(ggplot2)
+
+fh_simulated_mean <- rowMeans(fh_simulated_prices)
+
+# 500 paths for display
+set.seed(456)
+
+fh_display_ids <- sample(
+  seq_len(ncol(fh_simulated_prices)),
+  size = 500
+)
+
+fh_display_matrix <- fh_simulated_prices[
+  , fh_display_ids, drop = FALSE
+]
+
+fh_display_long <- data.frame(
+  Date = rep(fh_forecast_dates, times = 500),
+  Price = as.vector(fh_display_matrix),
+  Path = rep(
+    seq_len(500),
+    each = length(fh_forecast_dates)
+  )
+)
+
+fh_mean_data <- data.frame(Date = fh_forecast_dates,Mean = fh_simulated_mean)
+
+fh_path_plot <- ggplot() +
+  
+  # 95% prediction interval
+  geom_ribbon(data = fh_trajectory,aes(x = Date,ymin = Lower95,ymax = Upper95,fill = "95% prediction interval"),alpha = 0.22)+
+  # Display 500 paths
+  geom_line(
+    data = fh_display_long,
+    aes(
+      x = Date,
+      y = Price,
+      group = Path,
+      colour = "500 simulated GBM paths"
+    ),
+    alpha = 0.055,
+    linewidth = 0.3
+  ) +
+  
+  # Set horizons
+  geom_vline(
+    data = fh_markers,
+    aes(
+      xintercept = as.numeric(Date),
+      linetype = "Forecast horizons"
+    ),
+    colour = "grey45",
+    linewidth = 0.5
+  ) +
+  
+  # Mean of  simulations
+  geom_line(
+    data = fh_mean_data,
+    aes(
+      x = Date,
+      y = Mean,
+      colour = "Mean of 5000 paths"
+    ),
+    linewidth = 1.2
+  ) +
+  
+  # historical prices
+  geom_line(
+    data = fh_trajectory,
+    aes(
+      x = Date,
+      y = Observed,
+      colour = "Observed historical price"
+    ),
+    linewidth = 1.1
+  ) +
+  
+  # Prices at forecast horizon
+  geom_point(
+    data = fh_markers,
+    aes(x = Date, y = Observed),
+    colour = "red",
+    fill = "white",
+    shape = 21,
+    size = 2.6,
+    stroke = 0.9
+  ) +
+  
+  # Legend colours
+  scale_colour_manual(
+    name = NULL,
+    breaks = c(
+      "500 simulated GBM paths",
+      "Mean of 5000 paths",
+      "Observed historical price"
+    ),
+    values = c(
+      "500 simulated GBM paths" = "blue",
+      "Mean of 5000 paths" = "#17365D",
+      "Observed historical price" = "red"
+    )
+  ) +
+  
+  scale_fill_manual(
+    name = NULL,
+    values = c(
+      "95% prediction interval" = "#A7C9EC"
+    )
+  ) +
+  
+  scale_linetype_manual(
+    name = NULL,
+    values = c(
+      "Forecast horizons" = "dotted"
+    )
+  ) +
+  
+  guides(
+    colour = guide_legend(
+      order = 1,
+      override.aes = list(
+        alpha = 1,
+        linewidth = 1.1
+      )
+    ),
+    fill = guide_legend(order = 2),
+    linetype = guide_legend(order = 3)
+  ) +
+  
+  labs(
+    title = paste(
+      fh_stock,
+      ": Fixed-Parameter GBM Forecasts"
+    ),
+    subtitle = paste(
+      "5000 paths simulated, 500 displayed over 252 trading days"
+    ),
+    x = "Date",
+    y = "Closing price"
+  ) +
+  
+  theme_minimal(base_size = 12) +
+  
+  theme(
+    legend.position = "inside",
+    legend.position.inside = c(0.02, 0.98),
+    legend.text = element_text(size = 14),
+    legend.justification = c(0, 1),
+    legend.box = "vertical",
+    legend.direction = "vertical",
+    legend.title = element_blank(),
+    
+    legend.background = element_rect(
+      fill = scales::alpha("white", 0.85),
+      colour = "grey80"
+    ),
+    
+    plot.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+
+print(fh_path_plot)
+```
+
+### Accuracy of the different time horizons
+
+```{r fh-fixed-accuracy-table, echo=TRUE, message=FALSE, warning=FALSE}
+
+library(gt)
+
+fh_idx <- fh_horizons + 1L
+
+fh_actual_at_h <- fh_actual_prices[fh_idx]
+fh_expected_at_h <- fh_expected[fh_idx]
+
+fh_results <- data.frame(
+  Horizon_Days = fh_horizons,
+  Date = fh_forecast_dates[fh_idx],
+  Actual_Price = fh_actual_at_h,
+  GBM_Expected_Price = fh_expected_at_h,
+  GBM_APE = 100 * abs(fh_expected_at_h - fh_actual_at_h) / fh_actual_at_h,
+  NoChange_APE = 100 * abs(fh_S0 - fh_actual_at_h) / fh_actual_at_h,
+  Inside_95_Interval = fh_actual_at_h >= fh_lower95[fh_idx] & fh_actual_at_h <= fh_upper95[fh_idx]
+)
+
+fh_display <- data.frame(Horizon = fh_results$Horizon_Days,Forecast_Date = format(fh_results$Date, "%d/%m/%y"),
+  Actual_Close = fh_results$Actual_Price,
+  GBM_Close = fh_results$GBM_Expected_Price,
+  GBM_APE = fh_results$GBM_APE,
+  NoChange_APE = fh_results$NoChange_APE,
+  Inside_95 = ifelse(fh_results$Inside_95_Interval,"Yes", "No")
+)
+
+# Match format to industry summary
+fh_table <- gt::gt(fh_display) |>
+  
+  gt::tab_header(
+    title = paste(
+      "Forecast Horizon Summary:", fh_stock
+    )
+  ) |>
+  
+  gt::cols_label(
+    Horizon = gt::html("Horizon<br>(days)"),
+    Forecast_Date = "Forecast date",
+    Actual_Close = "Actual close",
+    GBM_Close = gt::html("GBM expected<br>close"),
+    GBM_APE = gt::html("GBM APE<br>(%)"),
+    NoChange_APE = gt::html("No-change APE<br>(%)"),
+    Inside_95 = gt::html("Inside 95%<br>interval?")
+  ) |>
+  
+  gt::fmt_number(
+    columns = c(
+      Actual_Close,
+      GBM_Close,
+      GBM_APE,
+      NoChange_APE
+    ),
+    decimals = 2
+  ) |>
+  
+  gt::cols_width(
+    Horizon ~ gt::px(70),
+    Forecast_Date ~ gt::px(90),
+    Actual_Close ~ gt::px(95),
+    GBM_Close ~ gt::px(105),
+    GBM_APE ~ gt::px(80),
+    NoChange_APE ~ gt::px(105),
+    Inside_95 ~ gt::px(85)
+  ) |>
+  
+  gt::cols_align(
+    align = "left",
+    columns = Horizon
+  ) |>
+  
+  gt::cols_align(
+    align = "right",
+    columns = c(
+      Actual_Close,
+      GBM_Close,
+      GBM_APE,
+      NoChange_APE
+    )
+  ) |>
+  
+  gt::cols_align(
+    align = "center",
+    columns = c(
+      Forecast_Date,
+      Inside_95
+    )
+  ) |>
+  
+# table style
+  gt::tab_options(
+    table.width = gt::pct(100),
+    table.font.names = "Arial",
+    table.font.size = gt::px(11),
+    table.font.color = "#686868",
+    data_row.padding = gt::px(5),
+    heading.align = "center",
+    heading.title.font.size = gt::px(15),
+    heading.title.font.weight = "normal",
+    column_labels.font.size = gt::px(11),
+    column_labels.font.weight = "normal",
+    table_body.hlines.color = "#D9D9D9"
+  ) |>
+  
+  # Grey centred title
+  gt::tab_style(
+    style = gt::cell_text(
+      color = "#666666"
+    ),
+    locations = gt::cells_title(
+      groups = "title"
+    )
+  )
+fh_table
+```
+
+## Comparison of Different Sectors
+
+Mean Annualised Volatility
+
+```{r comparison-volatility-graph, echo=TRUE, fig.height=7, fig.width=11, out.width="100%"}
+
+library(ggplot2)
+
+# volatility of each period
+
+vol_2020 <- period_results[["2020"]]$industry_summary
+vol_2024 <- period_results[["2024"]]$industry_summary
+
+volatility_data <- merge(
+  data.frame(
+    Industry = vol_2020$Industry,
+    Volatility_2020 = vol_2020$Annualised_Volatility * 100
+  ),
+  data.frame(
+    Industry = vol_2024$Industry,
+    Volatility_2024 = vol_2024$Annualised_Volatility * 100
+  ),
+  by = "Industry"
+)
+
+# filter
+
+volatility_data <- volatility_data[
+  complete.cases(volatility_data),
+]
+
+volatility_data$Industry <- factor(
+  volatility_data$Industry,
+  levels = volatility_data$Industry[
+    order(volatility_data$Volatility_2020)
+  ]
+)
+
+volatility_long <- rbind(
+  data.frame(
+    Industry = volatility_data$Industry,
+    Year = "2020",
+    Volatility = volatility_data$Volatility_2020
+  ),
+  data.frame(
+    Industry = volatility_data$Industry,
+    Year = "2024",
+    Volatility = volatility_data$Volatility_2024
+  )
+)
+
+volatility_long$Year <- factor(
+  volatility_long$Year,
+  levels = c("2020", "2024")
+)
+
+# dumbell plot
+
+volatility_dumbbell <- ggplot() +
+  
+  geom_segment(
+    data = volatility_data,
+    aes(
+      x = Volatility_2020,
+      xend = Volatility_2024,
+      y = Industry,
+      yend = Industry
+    ),
+    colour = "grey60",
+    linewidth = 1.3
+  ) +
+  
+  geom_point(
+    data = volatility_long,
+    aes(
+      x = Volatility,
+      y = Industry,
+      colour = Year
+    ),
+    size = 3.5
+  ) +
+  
+  scale_colour_manual(
+    values = c(
+      "2020" = "blue",
+      "2024" = "red"
+    )
+  ) +
+  
+  scale_x_continuous(
+    labels = function(x) paste0(x, "%"),
+    expand = expansion(mult = c(0.04, 0.08))
+  ) +
+  
+  labs(
+    title = "Mean Annualised Volatility by Industry",
+    subtitle = "Comparison between 2020 and 2024",
+    x = "Mean Annualised Volatility (%)",
+    y = NULL,
+    colour = "Period"
+  ) +
+  
+  theme_minimal(base_size = 13) +
+  
+  theme(
+    plot.title = element_text(
+      face = "bold",
+      size = 17
+    ),
+    
+    plot.subtitle = element_text(size = 12),
+    
+    axis.text.y = element_text(
+      size = 11,
+      colour = "black"
+    ),
+    
+    axis.text.x = element_text(size = 11),
+    
+    axis.title.x = element_text(size = 12),
+    
+    legend.position = "bottom",
+    
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    
+    panel.grid.major.x = element_line(
+      colour = "grey90"
+    )
+  )
+
+print(volatility_dumbbell)
+
+```
+
+Mean Absolute Skewness Plot
+
+```{r absolute-skewness-graph, echo=TRUE, fig.height=6, fig.width=11, out.width="100%"}
+
+print(
+  comparison_plots[["Mean Absolute Skewness"]]
+)
+```
+
+Initial comparison plot (above) replaced by q-q plot
+
+```{r kurtosis-qq-comparison, echo=TRUE, fig.height=9, fig.width=13, message=FALSE, warning=FALSE, out.width="100%"}
+
+library(ggplot2)
+
+# Find industries with highest and lowest excess kurtosis
+
+kurtosis_summary <- period_results[["2024"]]$distribution_comparison
+
+kurtosis_summary <- kurtosis_summary[
+  is.finite(kurtosis_summary$Mean_Absolute_Excess_Kurtosis),
+]
+
+highest_industry <- kurtosis_summary$Industry[
+  which.max(kurtosis_summary$Mean_Absolute_Excess_Kurtosis)
+]
+
+lowest_industry <- kurtosis_summary$Industry[
+  which.min(kurtosis_summary$Mean_Absolute_Excess_Kurtosis)
+]
+
+selected_industries <- c(highest_industry, lowest_industry)
+
+print(selected_industries)
+
+
+# calculate daily log returns
+
+get_industry_returns <- function(industry, year) {
+  
+  start <- as.Date(paste0(year, "-01-01"))
+  end <- as.Date(paste0(year, "-12-31"))
+  
+  tickers <- intersect(
+    industry_tickers[[industry]],
+    names(data_list)
+  )
+  
+  results <- list()
+  
+  for (ticker in tickers) {
+    
+    stock <- data_list[[ticker]]
+    
+    if (!all(c("date", "close") %in% names(stock))) next
+    
+    dates <- as.Date(stock$date)
+    prices <- suppressWarnings(
+      as.numeric(as.character(stock$close))
+    )
+    
+    valid <- !is.na(dates) &
+      dates >= start &
+      dates <= end &
+      is.finite(prices) &
+      prices > 0
+    
+    dates <- dates[valid]
+    prices <- prices[valid]
+    
+    if (length(prices) < 30) next
+    
+    prices <- prices[order(dates)]
+    
+    returns <- diff(log(prices))
+    returns <- returns[is.finite(returns)]
+    
+    if (length(returns) < 20) next
+    
+    volatility <- sd(returns)
+    
+    if (!is.finite(volatility) || volatility == 0) next
+    
+    # returns for each stock and year
+    
+    z_returns <- (returns - mean(returns)) / volatility
+    
+    results[[ticker]] <- data.frame(
+      Industry = industry,
+      Period = year,
+      Standardised_Return = z_returns
+    )
+  }
+  
+  if (length(results) == 0) return(NULL)
+  
+  do.call(rbind, results)
+}
+
+
+# returns for both industries and both periods
+
+plot_data <- list()
+
+for (industry in selected_industries) {
+  
+  for (year in c("2020", "2024")) {
+    
+    result <- get_industry_returns(industry, year)
+    
+    if (!is.null(result)) {
+      plot_data[[paste(industry, year)]] <- result
+    }
+  }
+}
+
+if (length(plot_data) == 0) {
+  stop("No eligible return data found.")
+}
+
+plot_data <- do.call(rbind, plot_data)
+
+# order of industries and years
+
+plot_data$Industry <- factor(
+  plot_data$Industry,
+  levels = selected_industries
+)
+
+plot_data$Period <- factor(
+  plot_data$Period,
+  levels = c("2020", "2024")
+)
+
+
+# Create four Q-Q plot
+
+qq_plot <- ggplot(
+  plot_data,
+  aes(sample = Standardised_Return,colour = Period)) +
+  stat_qq(size = 0.8,alpha = 0.5) +
+  geom_abline(slope = 1,intercept = 0,colour = "black",linetype = "dashed",linewidth = 0.9) +
+  facet_grid(rows = vars(Industry),cols = vars(Period),scales = "fixed") +
+  scale_colour_manual(values = c("2020" = "blue","2024" = "red")) +
+  labs(
+    title = "Normal Q-Q Plots by Industry",
+    subtitle = paste(
+      "Standardised daily log returns:", "2020 compared with 2024"),
+    x = "Theoretical Normal Quantiles", y = "Sample Quantiles",
+    caption = "Dashed black line: Standard Normal Distribution N(0,1)") +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 19),
+    plot.subtitle = element_text(size = 13),
+    strip.text = element_text(face = "bold", size = 12),
+    strip.background = element_rect(fill = "grey95",colour = NA),
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    panel.spacing = grid::unit(1, "cm"),
+    axis.title = element_text(size = 12),
+    plot.caption = element_text(size = 10, colour = "grey40")
+  )
+
+print(qq_plot)
+```
+
+### Median GBM Simulation MAPE Comparison
+
+```{r comparison-mape-graph, echo=TRUE, fig.height=6, fig.width=11, out.width="100%"}
+
+print(
+  comparison_plots[["Median GBM Simulation MAPE"]]
+)
+
+```
+
+median gbm simulation mape comparison across sectors
+
+### Industry Summary: 2020
+
+```{r individual-summary-for-1st-Period, echo=TRUE}
+stats <- period_results[["2020"]]$industry_summary
+distribution <- period_results[["2020"]]$distribution_comparison
+simulation <- period_results[["2020"]]$simulation_summary
+
+
+d <- match(stats$Industry, distribution$Industry)
+s <- match(stats$Industry, simulation$Industry)
+
+summary_2020 <- data.frame(
+  Industry = stats$Industry,
+  "Mean Volatility (%)" = stats$Annualised_Volatility * 100,
+  "Mean Abs. Skewness" = distribution$Mean_Absolute_Skewness[d],
+  "Mean Abs. Excess Kurtosis" = distribution$Mean_Absolute_Excess_Kurtosis[d],
+  "Median MAPE (%)" = simulation$Median_MAPE[s],
+  check.names = FALSE
+)
+
+# Average
+
+average_row <- summary_2020[1, , drop = FALSE]
+average_row$Industry <- "Average"
+
+for (column in names(summary_2020)[-1]) {
+  average_row[[column]] <- mean(summary_2020[[column]], na.rm = TRUE)
+}
+
+summary_2020 <- rbind(summary_2020, average_row)
+
+for (column in names(summary_2020)[-1]) {
+  summary_2020[[column]] <- format_sf3(summary_2020[[column]])
+}
+
+gt::gt(summary_2020) |>
+  gt::tab_header(
+    title = "Industry Summary: 2020"
+  ) |>
+  gt::cols_width(
+    Industry ~ gt::px(235)
+  ) |>
+  gt::tab_style(style = gt::cell_text(weight = "bold"),
+    locations = gt::cells_body(rows = Industry == "Average")
+  ) |>
+  gt::tab_style(style = gt::cell_borders(sides = "top",
+      color = "grey70",weight = gt::px(1)),
+    locations = gt::cells_body(rows = Industry == "Average")
+  ) |>
+  gt::tab_options(table.width = gt::pct(100), table.font.size = gt::px(12),data_row.padding = gt::px(4)
+  )
+```
+
+### Industry Summary: 2024
+
+```{r individual-summary-for-2nd-Period, echo=TRUE}
+stats <- period_results[["2024"]]$industry_summary
+distribution <- period_results[["2024"]]$distribution_comparison
+simulation <- period_results[["2024"]]$simulation_summary
+
+
+d <- match(stats$Industry, distribution$Industry)
+s <- match(stats$Industry, simulation$Industry)
+
+summary_2024 <- data.frame(
+  Industry = stats$Industry,
+  "Mean Volatility (%)" = stats$Annualised_Volatility * 100,
+  "Mean Abs. Skewness" = distribution$Mean_Absolute_Skewness[d],
+  "Mean Abs. Excess Kurtosis" = distribution$Mean_Absolute_Excess_Kurtosis[d],
+  "Median MAPE (%)" = simulation$Median_MAPE[s],
+  check.names = FALSE
+)
+
+# Average
+
+average_row <- summary_2024[1, , drop = FALSE]
+average_row$Industry <- "Average"
+
+for (column in names(summary_2024)[-1]) {
+  average_row[[column]] <- mean(summary_2024[[column]], na.rm = TRUE)
+}
+
+summary_2024 <- rbind(summary_2024, average_row)
+
+for (column in names(summary_2024)[-1]) {
+  summary_2024[[column]] <- format_sf3(summary_2024[[column]])
+}
+
+gt::gt(summary_2024) |>
+  gt::tab_header(
+    title = "Industry Summary: 2024"
+  ) |>
+  gt::cols_width(
+    Industry ~ gt::px(235)
+  ) |>
+  gt::tab_style(style = gt::cell_text(weight = "bold"),
+                locations = gt::cells_body(rows = Industry == "Average")
+  ) |>
+  gt::tab_style(style = gt::cell_borders(sides = "top",
+                                         color = "grey70",weight = gt::px(1)),
+                locations = gt::cells_body(rows = Industry == "Average")
+  ) |>
+  gt::tab_options(table.width = gt::pct(100), table.font.size = gt::px(12),data_row.padding = gt::px(4)
+  )
+```
+
+### Hypothesis testing of GBM Assumptions
+
+#### Jarque-Bera Normality Test
+
+```{r Jarque-Bera-Test-for-Normality, echo=TRUE}
+
+jb_industries <- list("Business Services and Building Products" =c("HWDN", "RTO", "RMV"),
+  "Property and Housebuilding" =c("BBOX", "BLND", "BTRW", "LAND","LMP", "PSN", "SGRO")
+)
+
+jb_years <- c(2020, 2024)
+jb_alpha <- 0.05
+jb_min_returns <- 100
+
+jb_results <- list()
+
+for (industry in names(jb_industries)) {
+  
+  for (ticker in jb_industries[[industry]]) {
+    
+    if (!ticker %in% names(data_list)) {
+      message("Stock not found: ", ticker)
+      next
+    }
+    
+    stock <- data_list[[ticker]]
+    
+    if (!all(c("date", "close") %in% names(stock))) {
+      message("Missing columns: ", ticker)
+      next
+    }
+    
+    stock$date <- as.Date(stock$date)
+    stock$close <- as.numeric(stock$close)
+    
+    for (year in jb_years) {
+      
+      # Filter to selected year
+      df <- stock[
+        !is.na(stock$date) &
+          format(stock$date, "%Y") == as.character(year) &
+          is.finite(stock$close) &
+          stock$close > 0,
+      ]
+      
+      df <- df[order(df$date), ]
+      df <- df[!duplicated(df$date), ]
+      
+      returns <- diff(log(df$close))
+      
+      if (length(returns) < jb_min_returns) next
+      
+      if (!is.finite(sd(returns)) ||
+          sd(returns) == 0) next
+      
+      test <- tseries::jarque.bera.test(returns)
+      
+      jb_results[[length(jb_results) + 1]] <-
+        data.frame(
+          Industry = industry,
+          Ticker = ticker,
+          Year = year,
+          JB_Statistic = as.numeric(test$statistic),
+          P_Value = test$p.value,
+          Reject_Normality = test$p.value < jb_alpha
+        )
+    }
+  }
+}
+
+if (length(jb_results) == 0) {
+  stop("No valid stock data found for the JB tests.")
+}
+
+jb_stock_results <- do.call(rbind, jb_results)
+
+# individual stock results
+print(jb_stock_results)
+
+#aggregate results
+
+jb_summary_long <- aggregate(
+  Reject_Normality ~ Industry + Year,
+  data = jb_stock_results,
+  FUN = function(x) c(
+    Tested = length(x),
+    Rejected = sum(x)
+  )
+)
+
+jb_summary_long <- data.frame(
+  Industry = jb_summary_long$Industry,
+  Year = jb_summary_long$Year,
+  Tested = jb_summary_long$Reject_Normality[, "Tested"],
+  Rejected = jb_summary_long$Reject_Normality[, "Rejected"]
+)
+
+jb_summary_long$Rejection_Rate <-
+  100 * jb_summary_long$Rejected /
+  jb_summary_long$Tested
+
+#create table
+
+format_jb_result <- function(industry, year) {
+  
+  df <- jb_summary_long[
+    jb_summary_long$Industry == industry &
+      jb_summary_long$Year == year,
+  ]
+  
+  if (nrow(df) == 0) return("No data")
+  
+  sprintf(
+    "%d/%d (%.1f%%)",
+    df$Rejected,
+    df$Tested,
+    df$Rejection_Rate
+  )
+}
+
+jb_comparison <- data.frame(
+  Industry = names(jb_industries),
+  
+  P1 = sapply(
+    names(jb_industries),
+    function(x) format_jb_result(x, 2020)
+  ),
+  
+  P2 = sapply(
+    names(jb_industries),
+    function(x) format_jb_result(x, 2024)
+  ),
+  
+  row.names = NULL
+)
+
+jb_table <- gt(jb_comparison) |>
+  tab_header(
+    title = "Jarque-Bera Normality Test",
+    subtitle = "Percentage of stocks rejecting normality"
+  ) |>
+  cols_label(Industry = "Industry",P1 = "2020",P2 = "2024"
+  ) |>
+  cols_align(align = "center",columns = c(P1, P2)
+  ) |>
+  cols_width(Industry ~ px(300),P1 ~ px(160),P2 ~ px(160)
+  ) |>
+  tab_options(table.font.size = px(14),data_row.padding = px(8),heading.title.font.size = px(17),heading.subtitle.font.size = px(12)
+  ) |>
+  tab_source_note(source_note ="Rejected / tested (percentage); significance level = 5%.")
+
+print(jb_table)
+
+#save results in tex format
+write.csv(jb_stock_results,"jb_stock_results.csv",row.names = FALSE)
+write.csv(jb_summary_long,"jb_industry_summary.csv",row.names = FALSE)
+gtsave(jb_table,"jb_normality_table.tex")
+
+#(earlier results were saved using console commands)
+```
+
+#### ARCH Test for Volatility Clustering
+
+```{r ARCH-test, echo=TRUE}
+library(gt)
+
+
+arch_industries <- list("Business Services and Building Products" =c("HWDN", "RTO", "RMV"),
+  "Property and Housebuilding" =c("BBOX", "BLND", "BTRW", "LAND","LMP", "PSN", "SGRO")
+)
+
+arch_years <- c(2020, 2024)
+arch_alpha <- 0.05
+arch_lags <- 10
+arch_min_returns <- 100
+
+arch_lm_test <- function(returns, lags = 10) {
+  
+  residuals <- returns - mean(returns)
+  squared_residuals <- residuals^2
+  
+  n <- length(squared_residuals)
+  
+  if (n <= lags + 1) {
+    stop("Not enough observations for ARCH-LM test.")
+  }
+  
+  y <- squared_residuals[(lags + 1):n]
+  
+  x <- sapply(
+    1:lags,
+    function(i) {
+      squared_residuals[
+        (lags + 1 - i):(n - i)
+      ]
+    }
+  )
+  
+  model <- lm(y ~ x)
+  
+  if (model$rank < lags + 1) {
+    stop("ARCH auxiliary regression is rank deficient.")
+  }
+  LM <- length(y) * summary(model)$r.squared
+  
+  p_value <- pchisq(
+    LM,
+    df = lags,
+    lower.tail = FALSE
+  )
+  
+  list(
+    statistic = LM,
+    p.value = p_value
+  )
+}
+
+#test for each stock each year
+
+arch_results <- list()
+
+for (industry in names(arch_industries)) {
+  
+  for (ticker in arch_industries[[industry]]) {
+    
+    if (!ticker %in% names(data_list)) {
+      message("Stock not found: ", ticker)
+      next
+    }
+    
+    stock <- data_list[[ticker]]
+    
+    if (!all(c("date", "close") %in% names(stock))) {
+      message("Missing columns: ", ticker)
+      next
+    }
+    
+    stock$date <- as.Date(stock$date)
+    stock$close <- as.numeric(
+      as.character(stock$close)
+    )
+    
+    for (year in arch_years) {
+      
+      df <- stock[
+        !is.na(stock$date) &
+          format(stock$date, "%Y") == as.character(year) &
+          is.finite(stock$close) &
+          stock$close > 0,
+      ]
+      
+      df <- df[order(df$date), ]
+      df <- df[!duplicated(df$date), ]
+      
+      returns <- diff(log(df$close))
+      
+      if (length(returns) < arch_min_returns) next
+      
+      if (!is.finite(sd(returns)) ||
+          sd(returns) == 0) next
+      
+      # test
+      test <- tryCatch(
+        arch_lm_test(returns, arch_lags),
+        error = function(e) NULL
+      )
+      
+      if (is.null(test)) next
+      
+      arch_results[[length(arch_results) + 1]] <-
+        data.frame(
+          Industry = industry,
+          Ticker = ticker,
+          Year = year,
+          ARCH_Statistic = test$statistic,
+          P_Value = test$p.value,
+          Reject_No_ARCH = test$p.value < arch_alpha
+        )
+    }
+  }
+}
+
+if (length(arch_results) == 0) {
+  stop("No valid stock data found for ARCH tests.")
+}
+
+arch_stock_results <- do.call(rbind,arch_results)
+
+#individual results
+print(arch_stock_results)
+
+#agg results
+
+arch_summary_long <- aggregate(
+  Reject_No_ARCH ~ Industry + Year,
+  data = arch_stock_results,
+  FUN = function(x) c(
+    Tested = length(x),
+    Rejected = sum(x)
+  )
+)
+
+arch_summary_long <- data.frame(
+  Industry = arch_summary_long$Industry,
+  Year = arch_summary_long$Year,
+  Tested = arch_summary_long$Reject_No_ARCH[, "Tested"],
+  Rejected = arch_summary_long$Reject_No_ARCH[, "Rejected"]
+)
+
+arch_summary_long$Rejection_Rate <-
+  100 * arch_summary_long$Rejected /
+  arch_summary_long$Tested
+
+#create table
+
+format_arch_result <- function(industry, year) {
+  
+  df <- arch_summary_long[
+    arch_summary_long$Industry == industry &
+      arch_summary_long$Year == year,
+  ]
+  if (nrow(df) == 0) return("No data")
+  sprintf(
+    "%d/%d (%.1f%%)",df$Rejected,df$Tested,df$Rejection_Rate)
+}
+arch_comparison <- data.frame(
+  Industry = names(arch_industries),
+  P1 = sapply(
+    names(arch_industries),
+    function(x) format_arch_result(x, 2020)
+  ),
+  P2 = sapply(
+    names(arch_industries),
+    function(x) format_arch_result(x, 2024)
+  ),
+  row.names = NULL
+)
+
+arch_table <- gt(arch_comparison) |>
+  tab_header(
+    title = "ARCH-LM Test for Volatility Clustering",
+    subtitle = "Percentage of stocks rejecting no ARCH effects"
+  ) |>
+  cols_label(
+    Industry = "Industry",P1 = "2020",P2 = "2024"
+  ) |>
+  cols_align(align = "center",columns = c(P1, P2)
+  ) |>
+  cols_width(Industry ~ px(300),P1 ~ px(160),P2 ~ px(160)
+  ) |>
+  tab_options(table.font.size = px(14), data_row.padding = px(8),
+    heading.title.font.size = px(17), heading.subtitle.font.size = px(12)
+  ) |>
+  tab_source_note(source_note ="Rejected / tested (percentage); 10 lags; significance level = 5%.")
+print(arch_table)
+
+#save table as tex
+write.csv(arch_stock_results, "arch_stock_results.csv",row.names = FALSE)
+write.csv(arch_summary_long,"arch_industry_summary.csv",row.names = FALSE)
+gtsave(arch_table,"arch_volatility_table.tex")
+
+```
