@@ -5,7 +5,7 @@ date: "2026-11-02"
 output: html_document
 ---
 
-The data is available on the repo
+The link to the data is available on the source list
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
